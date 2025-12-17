@@ -1,4 +1,4 @@
-name: Build Minikube ISO ARM64
+name: Build Minikube ISO ARM64 with Chaos Mesh Support
 
 on:
   workflow_dispatch:
@@ -39,22 +39,27 @@ jobs:
         with:
           go-version: '1.23'
 
-      - name: Checkout minikube
-        run: git clone --depth 1 https://github.com/kubernetes/minikube.git
+      - name: Checkout minikube fork with Chaos Mesh support
+        run: git clone --depth 1 https://github.com/pablomparada/minikube.git
 
-      - name: Add kernel modules
+      - name: Verify Chaos Mesh kernel modules in defconfig
         run: |
           cd minikube
-          echo "" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "# Chaos Mesh NetworkChaos support" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_SCH_HTB=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_SCH_PRIO=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_SCH_SFQ=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_SCH_TBF=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_SCH_NETEM=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_CLS_FW=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_CLS_U32=m" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-          echo "CONFIG_NET_CLS_MATCHALL=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          DEFCONFIG="deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig"
+          
+          echo "=== NET_SCH/NET_CLS configs in defconfig ==="
+          grep -E "NET_SCH_|NET_CLS_" "$DEFCONFIG"
+          
+          # Verify required modules are present
+          REQUIRED="CONFIG_NET_SCH_HTB=y CONFIG_NET_SCH_PRIO=y CONFIG_NET_SCH_NETEM=y"
+          for MODULE in $REQUIRED; do
+            if grep -q "^${MODULE}$" "$DEFCONFIG"; then
+              echo "OK: $MODULE"
+            else
+              echo "ERROR: $MODULE not found in defconfig"
+              exit 1
+            fi
+          done
 
       - name: Build buildroot image
         run: |
@@ -66,9 +71,73 @@ jobs:
           cd minikube
           make minikube-iso-aarch64
 
+      - name: Verify kernel config has Chaos Mesh modules
+        run: |
+          cd minikube
+          
+          echo "=== Searching for generated kernel .config ==="
+          KERNEL_CONFIG=$(find out -name ".config" -path "*linux*" 2>/dev/null | head -1)
+          
+          if [ -z "$KERNEL_CONFIG" ]; then
+            echo "ERROR: Could not find kernel .config file"
+            find out -name ".config" 2>/dev/null | head -10
+            exit 1
+          fi
+          
+          echo "Found kernel config at: $KERNEL_CONFIG"
+          echo ""
+          
+          # Required modules for Chaos Mesh NetworkChaos
+          REQUIRED_MODULES=(
+            "CONFIG_NET_SCH_HTB=y"
+            "CONFIG_NET_SCH_PRIO=y"
+            "CONFIG_NET_SCH_SFQ=y"
+            "CONFIG_NET_SCH_TBF=y"
+            "CONFIG_NET_SCH_NETEM=y"
+          )
+          
+          FAILED=0
+          echo "=== Checking required Chaos Mesh modules ==="
+          for MODULE in "${REQUIRED_MODULES[@]}"; do
+            if grep -q "^${MODULE}$" "$KERNEL_CONFIG"; then
+              echo "OK: $MODULE"
+            else
+              echo "MISSING: $MODULE"
+              MODULE_NAME=$(echo "$MODULE" | cut -d= -f1)
+              grep "$MODULE_NAME" "$KERNEL_CONFIG" || echo "   (not found at all)"
+              FAILED=1
+            fi
+          done
+          
+          echo ""
+          echo "=== All NET_SCH/NET_CLS configs in .config ==="
+          grep -E "NET_SCH_|NET_CLS_" "$KERNEL_CONFIG" | head -30
+          
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "BUILD FAILED: Required Chaos Mesh kernel modules are missing!"
+            echo "The ISO will NOT support NetworkChaos experiments."
+            exit 1
+          fi
+          
+          echo ""
+          echo "All required Chaos Mesh modules are present!"
+
+      - name: Verify ISO was created
+        run: |
+          cd minikube
+          
+          echo "=== ISO file info ==="
+          ls -lh out/minikube-arm64.iso
+          
+          echo ""
+          echo "=== ISO checksum ==="
+          sha256sum out/minikube-arm64.iso
+
       - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
           name: minikube-arm64-chaos-mesh
           path: minikube/out/minikube-arm64.iso
           retention-days: 7
+
