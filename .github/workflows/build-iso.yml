@@ -53,11 +53,15 @@ jobs:
 
       - name: Build buildroot image
         run: |
+          echo "Before buildroot:"
+          df -h
           cd minikube
           make buildroot-image
 
       - name: Build ARM64 ISO
         run: |
+          echo "Before minikube-iso-aarch64:"
+          df -h
           cd minikube
           make minikube-iso-aarch64
 
