@@ -1,0 +1,28 @@
+name: Build ISO
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add kernel modules
+        run: |
+          echo "" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "# Chaos Mesh NetworkChaos support" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_SCH_HTB=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_SCH_PRIO=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_SCH_SFQ=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_SCH_TBF=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_SCH_NETEM=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_CLS_FW=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_CLS_U32=m" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+          echo "CONFIG_NET_CLS_MATCHALL=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
+      - name: Build
+        run: |
+          make buildroot-image
+          make minikube-iso-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minikube-iso
+          path: out/minikube-aarch64.iso
