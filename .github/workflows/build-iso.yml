@@ -1,13 +1,46 @@
-name: Build ISO
-on: workflow_dispatch
+name: Build Minikube ISO ARM64
+
+on:
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      # Libera espaço em disco (CRÍTICO)
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          
+          # Remove software desnecessário
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          
+          # Limpa cache do apt
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          
+          # Remove imagens Docker pré-instaladas
+          docker system prune -af
+          
+          echo "After cleanup:"
+          df -h
+
+      - name: Checkout minikube
+        run: |
+          git clone --depth 1 https://github.com/kubernetes/minikube.git
+          cd minikube
+
       - name: Add kernel modules
         run: |
+          cd minikube
           echo "" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
           echo "# Chaos Mesh NetworkChaos support" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
           echo "CONFIG_NET_SCH_HTB=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
@@ -18,11 +51,23 @@ jobs:
           echo "CONFIG_NET_CLS_FW=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
           echo "CONFIG_NET_CLS_U32=m" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
           echo "CONFIG_NET_CLS_MATCHALL=y" >> deploy/iso/minikube-iso/board/minikube/aarch64/linux_aarch64_defconfig
-      - name: Build
+
+      - name: Build buildroot image
         run: |
+          cd minikube
           make buildroot-image
+
+      - name: Build ARM64 ISO
+        run: |
+          cd minikube
           make minikube-iso-aarch64
-      - uses: actions/upload-artifact@v4
+
+      - name: Check disk space after build
+        run: df -h
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
         with:
-          name: minikube-iso
-          path: out/minikube-aarch64.iso
+          name: minikube-aarch64-chaos-mesh
+          path: minikube/out/minikube-aarch64.iso
+          retention-days: 7
