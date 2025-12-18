@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y genisoimage ipset
+          sudo apt-get install -y genisoimage
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -122,6 +122,62 @@ jobs:
           
           echo ""
           echo "All required Chaos Mesh modules are present!"
+
+      - name: Verify Chaos Mesh packages are included in build
+        run: |
+          cd minikube
+          
+          echo "=== Checking required packages for Chaos Mesh ==="
+          DEFCONFIG="deploy/iso/minikube-iso/configs/minikube_aarch64_defconfig"
+          
+          # Critical packages for Chaos Mesh
+          # - ipset: required for traffic filtering by IP
+          # - iproute2: includes tc command for traffic control
+          # - iptables: firewall rules
+          REQUIRED_PACKAGES=(
+            "BR2_PACKAGE_IPSET=y"
+            "BR2_PACKAGE_IPROUTE2=y"
+            "BR2_PACKAGE_IPTABLES=y"
+          )
+          
+          # Nice-to-have packages for debugging
+          OPTIONAL_PACKAGES=(
+            "BR2_PACKAGE_TCPDUMP=y"
+            "BR2_PACKAGE_IPERF3=y"
+            "BR2_PACKAGE_NETCAT=y"
+            "BR2_PACKAGE_STRESS_NG=y"
+          )
+          
+          FAILED=0
+          
+          echo "--- Critical packages ---"
+          for PKG in "${REQUIRED_PACKAGES[@]}"; do
+            if grep -q "$PKG" "$DEFCONFIG"; then
+              echo "OK: $PKG"
+            else
+              echo "ERROR: $PKG not found!"
+              FAILED=1
+            fi
+          done
+          
+          echo ""
+          echo "--- Optional packages (debugging) ---"
+          for PKG in "${OPTIONAL_PACKAGES[@]}"; do
+            if grep -q "$PKG" "$DEFCONFIG"; then
+              echo "OK: $PKG"
+            else
+              echo "WARN: $PKG not found (optional)"
+            fi
+          done
+          
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "BUILD FAILED: Required Chaos Mesh packages are missing!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "All required Chaos Mesh packages are present!"
 
       - name: Verify ISO was created
         run: |
